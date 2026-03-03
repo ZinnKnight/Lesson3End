@@ -61,6 +61,7 @@ type Zakladka struct {
 }
 
 func main() {
+	mu := sync.Mutex{}
 	wg := sync.WaitGroup{}
 	syncOnes := sync.Once{}
 
@@ -83,48 +84,59 @@ func main() {
 		commChan <- comments
 	}()
 
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	for i := 0; i < len(commChan); i++ {
+		wg.Add(3)
 
-		session := Session{
-			ID:               sessionCounter,
-			SessionTimeStomp: time.Now(),
-		}
-		sessionCounter++
-		sessionChan <- session
+		go func() {
+			defer wg.Done()
+			mu.Lock()
+			session := Session{
+				ID:               sessionCounter,
+				SessionTimeStomp: time.Now(),
+			}
+			mu.Unlock()
+
+			sessionCounter++
+			sessionChan <- session
+		}()
+
+		go func() {
+			defer wg.Done()
+
+			comments := <-commChan
+			var users []User
+			for _, comment := range comments {
+				users = append(users, User{
+					ID:       comment.ID,
+					UserName: comment.UseID,
+				})
+			}
+		}()
+
+		go func() {
+			defer wg.Done()
+			session := <-sessionChan
+			sessionID = session.ID
+
+			if sessionID != 0 {
+				syncOnes.Do(func() {
+					zakladka := Zakladka{
+						Name: "Zakladka",
+					}
+					fmt.Println("Вложение полученно:", zakladka)
+				})
+			}
+			mu.Lock()
+			sessionID++
+			mu.Unlock()
+		}()
+	}
+	go func() {
+		wg.Wait()
+		close(commChan)
+		close(sessionChan)
 	}()
 
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-
-		comments := <-commChan
-		var users []User
-		for _, comment := range comments {
-			users = append(users, User{
-				ID:       comment.ID,
-				UserName: comment.UseID,
-			})
-		}
-	}()
-
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-
-		session := <-sessionChan
-		sessionID = session.ID
-
-		if sessionID != 0 {
-			syncOnes.Do(func() {
-				zakladka := Zakladka{
-					Name: "Zakladka",
-				}
-				fmt.Println("Вложение полученно:", zakladka)
-			})
-		}
-		sessionID++
-	}()
-	wg.Wait()
+	fmt.Println(<-commChan)
+	fmt.Println(<-sessionChan)
 }

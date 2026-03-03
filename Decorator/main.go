@@ -1,5 +1,11 @@
 package main
 
+import (
+	"fmt"
+	"strconv"
+	"sync"
+)
+
 /*
 
 ## Задание: Реализация декоратора для преобразования метрик в реальном времени
@@ -26,7 +32,7 @@ type ServerMetric struct {
 	Value float64 // Значение в байтах
 }
 
-func decorator(metrics <-chan ServerMetric, worker func(ServerMetric) ServerMetric) chan ServerMetric {
+func decorator(metrics chan ServerMetric) chan ServerMetric {
 	outChan := make(chan ServerMetric)
 	// я не уверен что так правильно, но работает и работу делает
 	// хотя по идее условные побитовые сдвиги или операции с байтами напрямую были бы более удобные наверное
@@ -36,7 +42,35 @@ func decorator(metrics <-chan ServerMetric, worker func(ServerMetric) ServerMetr
 		defer close(outChan)
 		for mx := range metrics {
 			mx.Value = mx.Value / float64(bytesInMegabites)
+			outChan <- mx
 		}
 	}()
 	return outChan
+}
+
+func main() {
+	metrics := make(chan ServerMetric)
+	
+	wg := sync.WaitGroup{}
+
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+
+		go func(i int) {
+			defer wg.Done()
+			metrics <- ServerMetric{
+				Name:  "server" + strconv.Itoa(i),
+				Value: 2.0 * float64(i),
+			}
+		}(i)
+	}
+
+	go func() {
+		wg.Wait()
+		close(metrics)
+	}()
+
+	for m := range decorator(metrics) {
+		fmt.Println(m)
+	}
 }

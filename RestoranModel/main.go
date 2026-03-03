@@ -1,6 +1,9 @@
 package main
 
-import "sync"
+import (
+	"fmt"
+	"sync"
+)
 
 /*
 
@@ -42,7 +45,7 @@ func NewRestoran(tables int) *Restaurant {
 	r := &Restaurant{
 		tables:    tables,
 		available: tables,
-		queue:     make([]int, tables),
+		queue:     make([]int, 0, tables),
 	}
 	r.cond = sync.NewCond(&r.mutex)
 	return r
@@ -50,28 +53,51 @@ func NewRestoran(tables int) *Restaurant {
 
 func (r *Restaurant) OccupyTable(id int) {
 	r.mutex.Lock()
+	defer r.mutex.Unlock()
 
 	r.queue = append(r.queue, id)
 	// я не совсем понял к чему привязать for, что бы не билдить полу-бесконечный цикл, но пока ничего не придумал
 	// так что будет пока что так, в дальнейшем вернусь поумневшим и сделаю лучше
-	for {
-		if r.available >= id && r.queue[0] == id {
-			break
-		}
+
+	for r.available <= id || r.queue[0] != id {
 		r.cond.Wait()
 	}
 	r.queue = r.queue[1:]
 	r.available--
 
-	r.mutex.Unlock()
 }
 
 func (r *Restaurant) ReleaseTable() {
 	r.mutex.Lock()
-	r.available++
+	defer r.mutex.Unlock()
 
+	r.available++
 	r.cond.Broadcast()
-	r.mutex.Unlock()
+}
+
+func main() {
+	test := NewRestoran(3)
+
+	wg := sync.WaitGroup{}
+
+	for i := 0; i < test.tables; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			test.OccupyTable(i)
+			fmt.Println("Occupy table", i)
+		}()
+	}
+
+	for i := 0; i < test.tables; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			test.ReleaseTable()
+			fmt.Println("Release table", i)
+		}()
+	}
+	wg.Wait()
 }
 
 // кароч пакет sync на 3х функциях не заканчивается, кто бы мог подумать, буду теперь долбить активно cond и once

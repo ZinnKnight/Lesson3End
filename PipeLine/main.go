@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"math/rand"
 	"strings"
 	"sync"
@@ -74,17 +75,18 @@ type ServerMetric struct {
 }
 
 func parseDecorator(metrics <-chan ServerMetric) chan ServerMetric {
-	revorkedData := make(chan ServerMetric)
+	reworkedData := make(chan ServerMetric)
 	go func() {
+		defer close(reworkedData)
 		for m := range metrics {
-			m.Name = strings.Join(strings.Fields(m.Name), "parsed - ")
-			revorkedData <- m
+			m.Name = "parsed - " + m.Name
+			reworkedData <- m
 		}
 	}()
-	return revorkedData
+	return reworkedData
 }
 
-func splitDecorator(revorkedData <-chan ServerMetric, n int) []chan ServerMetric {
+func splitDecorator(reworkedData <-chan ServerMetric, n int) []chan ServerMetric {
 	if n <= 0 {
 		return []chan ServerMetric{}
 	}
@@ -93,7 +95,7 @@ func splitDecorator(revorkedData <-chan ServerMetric, n int) []chan ServerMetric
 
 	for i := 0; i < n; i++ {
 		splitChans[i] = make(chan ServerMetric)
-		datafillChans[i] = splitChans[i]
+		datafillChans[i] = make(chan ServerMetric)
 	}
 
 	go func() {
@@ -104,11 +106,8 @@ func splitDecorator(revorkedData <-chan ServerMetric, n int) []chan ServerMetric
 			}
 		}()
 		i := 0
-		for m := range revorkedData {
-			splitChans[i] <- ServerMetric{
-				Name:  m.Name,
-				Value: m.Value,
-			}
+		for m := range reworkedData {
+			splitChans[i] <- m
 			i++
 			if i == n {
 				i = 0
@@ -127,6 +126,7 @@ func sendDecorator(splitChans []chan ServerMetric) chan ServerMetric {
 			defer wg.Done()
 			for m := range splitChan {
 				m.Name = strings.Replace(m.Name, "parsed - ", "sent - ", 1)
+				out <- m
 			}
 		}()
 	}
@@ -150,6 +150,14 @@ func main() {
 		}
 	}()
 
-	parseDecorator(metrics)
-	splitDecorator(metrics, 5)
+	parse := parseDecorator(metrics)
+
+	split := splitDecorator(parse, 5)
+
+	out := sendDecorator(split)
+
+	for m := range out {
+		fmt.Println(m.Name, m.Value)
+	}
+
 }

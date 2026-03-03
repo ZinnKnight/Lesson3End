@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"sync"
 )
 
@@ -78,16 +79,16 @@ func (q *BoundedQueue) Get() (interface{}, error) {
 	q.mutex.Lock()
 	defer q.mutex.Unlock()
 
-	for len(q.queueData) == q.capacity && !q.closed {
-		q.notFullCheckup.Wait()
+	for len(q.queueData) == 0 && !q.closed {
+		q.notEmptyCheckup.Wait()
 	}
 	if len(q.queueData) == 0 && q.closed {
+
 		return nil, ErrorClosedQueue
 	}
 	// если я правильно понимаю как это должно работать, то тут мы вроде держим ссылку на наш объект
 	// а значит её нужно будет снимать
 	task := q.queueData[0]
-	q.queueData = nil
 	q.queueData = q.queueData[1:]
 
 	q.notFullCheckup.Signal()
@@ -102,6 +103,45 @@ func (q *BoundedQueue) Shutdown() error {
 	q.notFullCheckup.Broadcast()
 	q.notEmptyCheckup.Broadcast()
 	return nil
+}
+
+func main() {
+	test := NewBoundedQueue(10)
+
+	wg := sync.WaitGroup{}
+
+	for i := 0; i < 9; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+		lp:
+			for {
+				task, err := test.Get()
+				if err != nil {
+					fmt.Printf("Consumer %d завершил работу", task)
+					return
+				}
+				fmt.Println(task)
+				break lp
+			}
+		}()
+	}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 10; i++ {
+
+			err := test.Put(i)
+			if err != nil {
+				fmt.Println("Producer остановлен")
+				return
+			}
+			fmt.Printf("Добавлено %d\n", i)
+		}
+		test.Shutdown()
+	}()
+
+	wg.Wait()
 }
 
 // половину кода в наглую скомуниздил из разных примеров как из документации, так и других людей, пока сильно
